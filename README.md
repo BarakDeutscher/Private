@@ -55,6 +55,7 @@ src/psdBreakpoints/
   upperConvexHullLogLog.m    Minimal enveloping breakpoint set
   reduceBreakpointsVW.m      Point-budget trim (Visvalingam-Whyatt)
   refineBreakpointsGreedy.m  Spend spare points to shrink the Grms ratio
+  applyPeakFrequencyBracketing.m  Flat +/-freq%% peak brackets, no amplitude margin
   evaluateBreakpointTable.m  Grms ratio + coverage margin for any table
   plotPSDBreakpoints.m       Log-log plot helper
   generatePSDBreakpointTable.m   Main entry point
@@ -153,6 +154,25 @@ MATLAB install.
   needing fewer points too (on one real flight-vibration spectrum: 21
   points at ratio 1.40 with `'uniform'`, vs. 14 points at ratio 1.25 with
   `'adaptive'`, same `MarginDB`).
+- **`PeakBracketing`** (default `false`) — represent each significant
+  narrowband peak with exactly **two flat, equal-amplitude breakpoints**
+  straddling it, at `±PeakFreqMarginFraction` (default 10%) of its
+  frequency, held at the peak's own raw PSD value (no amplitude margin
+  at all there). This is the standard way a resonance is broadened in a
+  derived test spec: widen it in *frequency* to cover uncertainty in
+  exactly where it sits (temperature, wear, unit-to-unit variation), not
+  by inflating its amplitude. `upperConvexHullLogLog` naturally collapses
+  the flat plateau this creates down to just its two edges - the peak's
+  own sample becomes redundant, so tracing its exact shape (which can
+  otherwise take several points) is no longer needed. Trade-off: a flat
+  cap across a wide band overshoots more in the peak's flanks than
+  tightly tracing its true shape would, so the achieved Grms ratio is
+  usually a bit higher than without bracketing, for the same point
+  count - narrow `PeakFreqMarginFraction` or raise `MaxPoints` if that
+  pushes you over `TargetRmsRatio`. `PeakMinProminenceDB` (default 6 dB)
+  sets how much a local maximum must stand out - via true topographic
+  prominence, not just "the nearest dip on each side" - to count as a
+  peak worth bracketing.
 - **`TargetRmsRatio`** — the ceiling you want on `grms_new / grms_original`.
   This is a check, not a hard constraint: `diagnostics.meetsRmsTarget`
   reports whether it was actually achieved, with a warning if not.

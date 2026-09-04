@@ -122,4 +122,43 @@ curveAdapt = interpBreakpointCurve(fAdapt(hullAdapt), psdTargetAdapt(hullAdapt),
 assert(min(curveAdapt - psdTargetAdapt) >= -1e-9*max(psdTargetAdapt), ...
     'adaptive-margin hull failed to envelope its own target');
 
+%% 8. applyPeakFrequencyBracketing: flat, unmargined +/-10% peak brackets
+% Single isolated narrow peak: should produce exactly one bracket, at the
+% peak's own raw amplitude (no amplitude margin), and the hull built on
+% the augmented arrays should collapse the whole peak to just the two
+% bracket edges (the peak's own sample becomes redundant/interior).
+fPk = (1:1:300)';
+psdPk = 1e-3*ones(size(fPk)) + 0.05*exp(-((fPk-100).^2)/(2*3^2));
+psdTargetPk = psdPk; % no separate margin scheme layered on top, for clarity
+
+[fAugPk, psdTargetAugPk, peakListPk] = applyPeakFrequencyBracketing(fPk, psdPk, psdTargetPk, 0.10, 6);
+assert(numel(peakListPk) == 1, 'expected exactly one bracketed peak');
+assert(abs(peakListPk(1).freqLeft - 90) < 1e-9 && abs(peakListPk(1).freqRight - 110) < 1e-9, ...
+    'peak bracket edges should be at +/-10%% of the peak frequency');
+assert(abs(peakListPk(1).psd - psdPk(fPk==100)) < 1e-12, ...
+    'peak bracket amplitude should exactly equal the raw (unmargined) peak PSD');
+
+hullPk = upperConvexHullLogLog(fAugPk, psdTargetAugPk);
+hullFreqsPk = fAugPk(hullPk);
+assert(~any(abs(hullFreqsPk - 100) < 1e-9), ...
+    'the peak''s own sample should become redundant once bracketed (dominated by the flat plateau)');
+assert(any(abs(hullFreqsPk - 90) < 1e-9) && any(abs(hullFreqsPk - 110) < 1e-9), ...
+    'both bracket edges should survive as hull vertices');
+
+curvePk = interpBreakpointCurve(fAugPk(hullPk), psdTargetAugPk(hullPk), fPk);
+assert(min(curvePk - psdPk) >= -1e-9*max(psdPk), ...
+    'peak-bracketed hull failed to envelope the true original spectrum');
+
+%% 9. applyPeakFrequencyBracketing: two close peaks must merge into one bracket
+% Two peaks close enough that their +/-10% bands overlap must not produce
+% two conflicting brackets; they should merge into a single wider one
+% whose flat level is the true max of the WHOLE merged band (so coverage
+% can never be violated, even for the lower of the two peaks' own band).
+fTwo = (1:1:300)';
+psdTwo = 1e-3*ones(size(fTwo)) + 0.05*exp(-((fTwo-100).^2)/(2*4^2)) + 0.03*exp(-((fTwo-108).^2)/(2*4^2));
+[~, ~, peakListTwo] = applyPeakFrequencyBracketing(fTwo, psdTwo, psdTwo, 0.10, 6);
+assert(numel(peakListTwo) == 1, 'two overlapping-band peaks should merge into a single bracket');
+assert(peakListTwo(1).freqLeft < 100 && peakListTwo(1).freqRight > 108, ...
+    'merged bracket should span both original peaks'' individual bands');
+
 fprintf('All psdBreakpoints sanity tests passed.\n');

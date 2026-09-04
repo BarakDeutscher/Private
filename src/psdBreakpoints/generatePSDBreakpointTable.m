@@ -29,6 +29,30 @@ function [bpTable, diagnostics] = generatePSDBreakpointTable(f, psd, varargin)
 %                       margin everywhere would, while the quiet floor -
 %                       which barely affects Grms regardless of its
 %                       margin - keeps the full requested headroom.
+%     'PeakBracketing' If true (default false), significant narrowband
+%                       peaks are represented by exactly two flat, equal-
+%                       amplitude breakpoints straddling each one, at
+%                       PeakFreqMarginFraction on either side of the peak
+%                       frequency, held at the peak's own RAW psd value
+%                       (no amplitude margin there at all) - the standard
+%                       way a resonance is broadened in derived vibration
+%                       test breakpoint tables to cover uncertainty in
+%                       exactly where it sits, rather than by amplitude
+%                       inflation. Applied before the normal margin
+%                       scheme's hull/trim/refine steps, so it can reduce
+%                       point count a lot around real resonances, at the
+%                       cost of some excess area in the peak's flanks
+%                       (a flat cap across a wide band overshoots more
+%                       than tightly tracing the peak's true shape would)
+%                       - if TargetRmsRatio isn't met, narrow
+%                       PeakFreqMarginFraction or raise MaxPoints.
+%     'PeakFreqMarginFraction'  Half-width of each peak bracket as a
+%                       fraction of its frequency (default 0.10, i.e.
+%                       +/-10%%). Only used when PeakBracketing is true.
+%     'PeakMinProminenceDB'  Minimum topographic prominence, in dB, for a
+%                       local maximum to count as a "peak" worth
+%                       bracketing (default 6 dB). Only used when
+%                       PeakBracketing is true.
 %     'TargetRmsRatio' Desired upper bound on grms_new/grms_orig (default
 %                       1.4). If the minimal fully-enveloping breakpoint
 %                       set already fits within MaxPoints but overshoots
@@ -80,6 +104,9 @@ addRequired(p, 'psd', @(v) isvector(v) && isnumeric(v));
 addParameter(p, 'MaxPoints', 12, @(v) isscalar(v) && v >= 2);
 addParameter(p, 'MarginDB', 3, @(v) isscalar(v) && isnumeric(v));
 addParameter(p, 'MarginMode', 'uniform', @(v) any(strcmpi(v, {'uniform','adaptive'})));
+addParameter(p, 'PeakBracketing', false, @(v) isscalar(v));
+addParameter(p, 'PeakFreqMarginFraction', 0.10, @(v) isscalar(v) && v > 0 && v < 1);
+addParameter(p, 'PeakMinProminenceDB', 6, @(v) isscalar(v) && v > 0);
 addParameter(p, 'TargetRmsRatio', 1.4, @(v) isscalar(v) && v > 1);
 addParameter(p, 'Interactive', false, @(v) isscalar(v));
 addParameter(p, 'Plot', true, @(v) isscalar(v));
@@ -91,6 +118,9 @@ psd = p.Results.psd(:);
 maxPoints = round(p.Results.MaxPoints);
 marginDB = p.Results.MarginDB;
 marginMode = lower(char(p.Results.MarginMode));
+doPeakBracketing = logical(p.Results.PeakBracketing);
+peakFreqMarginFraction = p.Results.PeakFreqMarginFraction;
+peakMinProminenceDB = p.Results.PeakMinProminenceDB;
 targetRmsRatio = p.Results.TargetRmsRatio;
 doInteractive = logical(p.Results.Interactive);
 doPlot = logical(p.Results.Plot);
@@ -170,7 +200,23 @@ else
     psdTarget = psd .* 10.^(marginDBLocal/10);
 end
 
-hullIdx = upperConvexHullLogLog(f, psdTarget);
+% ---- optional peak frequency bracketing --------------------------------
+% Broadens significant narrowband peaks in FREQUENCY (a flat, unmargined
+% plateau spanning +/-PeakFreqMarginFraction around each) rather than in
+% amplitude, before the general hull/trim/refine machinery runs on
+% whatever is left. Adds new synthetic anchor frequencies at the bracket
+% edges, so fHull/psdTargetHull can have more points than the original
+% (f, psd) - diagnostics are always computed against the true original
+% spectrum regardless.
+if doPeakBracketing
+    [fHull, psdTargetHull] = applyPeakFrequencyBracketing(f, psd, psdTarget, ...
+        peakFreqMarginFraction, peakMinProminenceDB);
+else
+    fHull = f;
+    psdTargetHull = psdTarget;
+end
+
+hullIdx = upperConvexHullLogLog(fHull, psdTargetHull);
 
 if numel(hullIdx) > maxPoints
     warning('generatePSDBreakpointTable:pointBudgetExceeded', ...
@@ -178,8 +224,8 @@ if numel(hullIdx) > maxPoints
          'requested; reducing the point count will leave small regions ' ...
          'of the original spectrum uncovered by the requested margin.'], ...
         numel(hullIdx), maxPoints);
-    x = log10(f);
-    y = log10(psdTarget);
+    x = log10(fHull);
+    y = log10(psdTargetHull);
     hullIdx = reduceBreakpointsVW(x, y, hullIdx, maxPoints);
 elseif numel(hullIdx) < maxPoints
     % The minimal fully-enveloping hull already fits the point budget -
@@ -191,11 +237,11 @@ elseif numel(hullIdx) < maxPoints
     % creates still cover everything in their own sub-ranges). Spend the
     % spare point budget on this before giving up on TargetRmsRatio.
     targetGrms = targetRmsRatio * grmsOriginal;
-    hullIdx = refineBreakpointsGreedy(f, psdTarget, hullIdx, maxPoints, targetGrms);
+    hullIdx = refineBreakpointsGreedy(fHull, psdTargetHull, hullIdx, maxPoints, targetGrms);
 end
 
-bpFreq = f(hullIdx);
-bpPsd  = psdTarget(hullIdx);
+bpFreq = fHull(hullIdx);
+bpPsd  = psdTargetHull(hullIdx);
 bpTable = table(bpFreq, bpPsd, 'VariableNames', {'Frequency_Hz', 'PSD'});
 
 % ---- diagnostics (grms ratio + worst-case coverage margin) ------------
