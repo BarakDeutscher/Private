@@ -161,4 +161,38 @@ assert(numel(peakListTwo) == 1, 'two overlapping-band peaks should merge into a 
 assert(peakListTwo(1).freqLeft < 100 && peakListTwo(1).freqRight > 108, ...
     'merged bracket should span both original peaks'' individual bands');
 
+%% 10. pruneNegligibleBreakpoints: drop points that don't pull their weight
+% Build a breakpoint set with one obviously-redundant point (sitting
+% exactly on the straight line between its neighbors, in log-log space -
+% zero-cost to remove) alongside a genuinely necessary peak. Pruning
+% should drop the redundant one and keep the peak.
+fPrune = (1:1:400)';
+psdPrune = 1e-3*ones(size(fPrune)) + 0.2*exp(-((fPrune-200).^2)/(2*3^2));
+grmsOrigPrune = computeOriginalGrms(fPrune, psdPrune);
+
+% breakpoints: start, an exactly-collinear midpoint (redundant by
+% construction), the peak, and the end.
+idxStart = 1; idxMid = 51; idxPeak = find(fPrune==200); idxEnd = numel(fPrune);
+xA = log10(fPrune(idxStart)); yA = log10(psdPrune(idxStart));
+xC = log10(fPrune(idxPeak));  yC = log10(psdPrune(idxPeak));
+xMid = log10(fPrune(idxMid));
+yMidCollinear = yA + (yC-yA)*(xMid-xA)/(xC-xA);
+psdTargetPrune = psdPrune;
+psdTargetPrune(idxMid) = 10^yMidCollinear; % force it exactly onto the A-peak line
+
+bpIdxPrune = [idxStart, idxMid, idxPeak, idxEnd];
+grmsBeforePrune = computeBreakpointGrms(fPrune(bpIdxPrune), psdTargetPrune(bpIdxPrune));
+
+prunedIdx = pruneNegligibleBreakpoints(fPrune, psdTargetPrune, bpIdxPrune, grmsOrigPrune, ...
+    grmsBeforePrune/grmsOrigPrune + 0.01); % generous target: only true negligibility matters here
+
+assert(~ismember(idxMid, prunedIdx), 'pruning failed to drop an exactly-redundant (collinear) breakpoint');
+assert(ismember(idxPeak, prunedIdx), 'pruning must never drop a genuinely necessary peak');
+assert(ismember(idxStart, prunedIdx) && ismember(idxEnd, prunedIdx), ...
+    'pruning must never drop the first/last breakpoint');
+
+curvePrune = interpBreakpointCurve(fPrune(prunedIdx), psdTargetPrune(prunedIdx), fPrune);
+assert(min(curvePrune - psdTargetPrune) >= -1e-9*max(psdTargetPrune), ...
+    'pruning must never break coverage');
+
 fprintf('All psdBreakpoints sanity tests passed.\n');

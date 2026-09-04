@@ -64,7 +64,12 @@ function [bpTable, diagnostics] = generatePSDBreakpointTable(f, psd, varargin)
 %                       combination can reach every target).
 %                       diagnostics.meetsRmsTarget reports whether it was
 %                       actually achieved, with a warning if not (reduce
-%                       MarginDB and/or raise MaxPoints to fix it).
+%                       MarginDB and/or raise MaxPoints to fix it). Every
+%                       breakpoint is then checked (pruneNegligibleBreakpoints.m)
+%                       and removed if doing so neither breaks coverage
+%                       nor pushes the ratio back over this target - so
+%                       the final table never carries a point that isn't
+%                       actually doing something.
 %     'Interactive'    If true, opens a GUI table editor after the
 %                       automatic table is built, letting you drag
 %                       breakpoints, add/delete rows, and see the Grms
@@ -239,6 +244,16 @@ elseif numel(hullIdx) < maxPoints
     targetGrms = targetRmsRatio * grmsOriginal;
     hullIdx = refineBreakpointsGreedy(fHull, psdTargetHull, hullIdx, maxPoints, targetGrms);
 end
+
+% ---- prune any breakpoint that isn't actually pulling its weight -------
+% refineBreakpointsGreedy only ever inserts points; it never re-checks
+% whether an earlier insertion became redundant once later ones were
+% added nearby, or whether the last few points that just barely pushed
+% the ratio under target left some neighbors over-provisioned. This
+% removes any breakpoint whose removal would neither break coverage nor
+% push the ratio back over TargetRmsRatio - i.e. keeps only breakpoints
+% that actually do something.
+hullIdx = pruneNegligibleBreakpoints(fHull, psdTargetHull, hullIdx, grmsOriginal, targetRmsRatio);
 
 bpFreq = fHull(hullIdx);
 bpPsd  = psdTargetHull(hullIdx);

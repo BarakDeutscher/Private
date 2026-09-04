@@ -55,6 +55,7 @@ src/psdBreakpoints/
   upperConvexHullLogLog.m    Minimal enveloping breakpoint set
   reduceBreakpointsVW.m      Point-budget trim (Visvalingam-Whyatt)
   refineBreakpointsGreedy.m  Spend spare points to shrink the Grms ratio
+  pruneNegligibleBreakpoints.m  Drop any point that isn't pulling its weight
   applyPeakFrequencyBracketing.m  Flat +/-freq%% peak brackets, no amplitude margin
   evaluateBreakpointTable.m  Grms ratio + coverage margin for any table
   plotPSDBreakpoints.m       Log-log plot helper
@@ -175,7 +176,14 @@ MATLAB install.
   peak worth bracketing.
 - **`TargetRmsRatio`** — the ceiling you want on `grms_new / grms_original`.
   This is a check, not a hard constraint: `diagnostics.meetsRmsTarget`
-  reports whether it was actually achieved, with a warning if not.
+  reports whether it was actually achieved, with a warning if not. Every
+  breakpoint is checked afterward (`pruneNegligibleBreakpoints.m`) and
+  dropped if removing it neither breaks coverage nor pushes the ratio
+  back over this target - so a tight target that needed many points
+  inserted greedily doesn't leave some of them redundant once the full
+  set is assembled (a later insertion nearby can end up doing an
+  earlier one's job, or the last few points added to just barely clear
+  target can leave neighbors over-provisioned).
 
 ### Why the ratio can overshoot even with points to spare
 
