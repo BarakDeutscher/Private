@@ -139,10 +139,20 @@ MATLAB install.
   curve dips below the original by that many dB somewhere). If the exact
   envelope needs fewer, the spare points are spent narrowing the Grms
   ratio (see below) rather than left unused.
-- **`MarginDB`** — how far above the original PSD the curve should sit,
-  applied uniformly before the envelope is fit. `0` = tight envelope
-  (curve touches the original at its peaks), positive values add
-  headroom (e.g. for test tolerance bands).
+- **`MarginDB`** — how far above the original PSD the curve should sit
+  before the envelope is fit. `0` = tight envelope (curve touches the
+  original at its peaks), positive values add headroom (e.g. for test
+  tolerance bands). Its meaning depends on `MarginMode`.
+- **`MarginMode`** — `'uniform'` (default) applies `MarginDB` everywhere,
+  flat. `'adaptive'` applies `MarginDB` only at the spectrum's quietest
+  point and tapers it linearly (in dB, vs. normalized log-amplitude) down
+  to **0 dB exactly at the loudest peak** - so major peaks are not
+  inflated at all, and low-amplitude regions get the most headroom. Since
+  the peak dominates the Grms integral, leaving it untouched typically
+  cuts the ratio far more than shaving a uniform margin ever could, often
+  needing fewer points too (on one real flight-vibration spectrum: 21
+  points at ratio 1.40 with `'uniform'`, vs. 14 points at ratio 1.25 with
+  `'adaptive'`, same `MarginDB`).
 - **`TargetRmsRatio`** — the ceiling you want on `grms_new / grms_original`.
   This is a check, not a hard constraint: `diagnostics.meetsRmsTarget`
   reports whether it was actually achieved, with a warning if not.
@@ -166,11 +176,11 @@ need very few points (e.g. 9) but overshoot the target ratio by a lot
 (e.g. 2.5x), while spending a realistic point budget (e.g. 21) on
 targeted insertions gets it back under target.
 
-### Important interaction: margin sets a floor on the ratio
+### Important interaction: margin sets a floor on the ratio (uniform mode only)
 
 Scaling every PSD value by a constant factor scales Grms by that
-factor's square root. So `MarginDB` alone imposes a **hard lower bound**
-on the achievable ratio:
+factor's square root. So with `MarginMode='uniform'`, `MarginDB` alone
+imposes a **hard lower bound** on the achievable ratio:
 
 ```
 min achievable ratio = sqrt(10^(MarginDB/10))
@@ -179,7 +189,10 @@ min achievable ratio = sqrt(10^(MarginDB/10))
 For `TargetRmsRatio = 1.4`, that means `MarginDB` must stay below
 `20*log10(1.4) ≈ 2.92 dB`, or the target is mathematically unreachable
 regardless of `MaxPoints`. The function checks this up front and warns
-you if your `MarginDB`/`TargetRmsRatio` combination conflicts.
+you if your `MarginDB`/`TargetRmsRatio` combination conflicts. This floor
+does not apply to `MarginMode='adaptive'` - there the effective scaling
+varies by frequency, so there's no simple closed form; the actual ratio
+just gets computed and checked against `TargetRmsRatio` as usual.
 
 ## Manual editing
 

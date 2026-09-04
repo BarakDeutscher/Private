@@ -18,6 +18,17 @@ function [bpTable, diagnostics] = generatePSDBreakpointTable(f, psd, varargin)
 %     'MarginDB'       Coverage margin applied above the original PSD, in
 %                       dB, before the envelope is fit (default 3 dB; use
 %                       0 dB for a tight envelope with no headroom).
+%     'MarginMode'     'uniform' (default): every point gets the same
+%                       MarginDB. 'adaptive': the margin is NOT a flat
+%                       factor everywhere - it varies linearly (in dB,
+%                       vs. normalized log-amplitude) between MarginDB at
+%                       the spectrum's quietest point and 0 dB at its
+%                       loudest peak. Since the loudest peak dominates
+%                       the Grms integral the most, leaving it un-inflated
+%                       cuts the ratio a lot more than uniformly shaving
+%                       margin everywhere would, while the quiet floor -
+%                       which barely affects Grms regardless of its
+%                       margin - keeps the full requested headroom.
 %     'TargetRmsRatio' Desired upper bound on grms_new/grms_orig (default
 %                       1.4). If the minimal fully-enveloping breakpoint
 %                       set already fits within MaxPoints but overshoots
@@ -68,6 +79,7 @@ addRequired(p, 'f', @(v) isvector(v) && isnumeric(v));
 addRequired(p, 'psd', @(v) isvector(v) && isnumeric(v));
 addParameter(p, 'MaxPoints', 12, @(v) isscalar(v) && v >= 2);
 addParameter(p, 'MarginDB', 3, @(v) isscalar(v) && isnumeric(v));
+addParameter(p, 'MarginMode', 'uniform', @(v) any(strcmpi(v, {'uniform','adaptive'})));
 addParameter(p, 'TargetRmsRatio', 1.4, @(v) isscalar(v) && v > 1);
 addParameter(p, 'Interactive', false, @(v) isscalar(v));
 addParameter(p, 'Plot', true, @(v) isscalar(v));
@@ -78,6 +90,7 @@ f = p.Results.f(:);
 psd = p.Results.psd(:);
 maxPoints = round(p.Results.MaxPoints);
 marginDB = p.Results.MarginDB;
+marginMode = lower(char(p.Results.MarginMode));
 targetRmsRatio = p.Results.TargetRmsRatio;
 doInteractive = logical(p.Results.Interactive);
 doPlot = logical(p.Results.Plot);
@@ -115,26 +128,46 @@ end
 grmsOriginal = computeOriginalGrms(f, psd);
 
 % ---- margined target and minimal enveloping breakpoint set ------------
-marginFactor = 10^(marginDB/10);
-psdTarget = psd * marginFactor;
+if strcmp(marginMode, 'uniform')
+    marginFactor = 10^(marginDB/10);
+    psdTarget = psd * marginFactor;
 
-% A uniform dB margin alone raises grms by exactly sqrt(marginFactor),
-% since scaling a PSD by a constant scales its integral by that constant.
-% That is therefore a hard floor on the achievable ratio for ANY curve
-% that fully envelopes psdTarget (any point reduction only pushes the
-% ratio up further, never below this floor). Warn early if the request
-% is self-contradictory.
-minAchievableRatio = sqrt(marginFactor);
-if targetRmsRatio < minAchievableRatio
-    maxMarginForTarget = 20*log10(targetRmsRatio);
-    warning('generatePSDBreakpointTable:targetUnreachable', ...
-        ['MarginDB = %.2f dB alone forces grms ratio >= %.3f (a uniform dB ' ...
-         'margin scales grms by sqrt(10^(MarginDB/10))), which already ' ...
-         'exceeds TargetRmsRatio = %.3f - no number of breakpoints can ' ...
-         'reach the target while keeping full coverage. Lower MarginDB ' ...
-         'below %.2f dB, or raise TargetRmsRatio, or accept a table that ' ...
-         'does not fully envelope the original.'], ...
-        marginDB, minAchievableRatio, targetRmsRatio, maxMarginForTarget);
+    % A uniform dB margin alone raises grms by exactly sqrt(marginFactor),
+    % since scaling a PSD by a constant scales its integral by that
+    % constant. That is therefore a hard floor on the achievable ratio
+    % for ANY curve that fully envelopes psdTarget (any point reduction
+    % only pushes the ratio up further, never below this floor). Warn
+    % early if the request is self-contradictory.
+    minAchievableRatio = sqrt(marginFactor);
+    if targetRmsRatio < minAchievableRatio
+        maxMarginForTarget = 20*log10(targetRmsRatio);
+        warning('generatePSDBreakpointTable:targetUnreachable', ...
+            ['MarginDB = %.2f dB alone forces grms ratio >= %.3f (a uniform dB ' ...
+             'margin scales grms by sqrt(10^(MarginDB/10))), which already ' ...
+             'exceeds TargetRmsRatio = %.3f - no number of breakpoints can ' ...
+             'reach the target while keeping full coverage. Lower MarginDB ' ...
+             'below %.2f dB, or raise TargetRmsRatio, or accept a table that ' ...
+             'does not fully envelope the original.'], ...
+            marginDB, minAchievableRatio, targetRmsRatio, maxMarginForTarget);
+    end
+else
+    % Adaptive margin: linear in dB vs. normalized log-amplitude, from
+    % MarginDB at the quietest sample (normalizedLevel=0) down to 0 dB at
+    % the loudest peak (normalizedLevel=1). No simple closed-form floor
+    % exists here (unlike the uniform case above), since the scaling is
+    % no longer a single constant - it depends on how much of the
+    % spectrum's Grms actually comes from near-peak vs. near-floor
+    % content.
+    psdDB = 10*log10(psd);
+    minDB = min(psdDB);
+    maxDB = max(psdDB);
+    if maxDB > minDB
+        normalizedLevel = (psdDB - minDB) / (maxDB - minDB);
+    else
+        normalizedLevel = ones(size(psd)); % flat spectrum: nothing to grade
+    end
+    marginDBLocal = marginDB * (1 - normalizedLevel);
+    psdTarget = psd .* 10.^(marginDBLocal/10);
 end
 
 hullIdx = upperConvexHullLogLog(f, psdTarget);
@@ -188,8 +221,13 @@ fprintf('  Original Grms         : %.4f\n', diagnostics.grmsOriginal);
 fprintf('  Breakpoint Grms       : %.4f\n', diagnostics.grmsBreakpoint);
 fprintf('  Grms ratio (new/orig) : %.4f  (target <= %.3f)  %s\n', ...
     diagnostics.rmsRatio, targetRmsRatio, tern(diagnostics.meetsRmsTarget, 'OK', 'EXCEEDED'));
-fprintf('  Min coverage margin   : %.2f dB (requested %.2f dB)\n', ...
-    diagnostics.minMarginDB, marginDB);
+if strcmp(marginMode, 'uniform')
+    fprintf('  Min coverage margin   : %.2f dB (requested %.2f dB)\n', ...
+        diagnostics.minMarginDB, marginDB);
+else
+    fprintf(['  Min coverage margin   : %.2f dB (adaptive: %.2f dB at the ' ...
+        'quiet floor tapering to 0 dB at the peak)\n'], diagnostics.minMarginDB, marginDB);
+end
 fprintf('  Breakpoints used      : %d / %d max\n', diagnostics.numPoints, maxPoints);
 
 if doPlot

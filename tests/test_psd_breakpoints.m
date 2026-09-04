@@ -91,4 +91,35 @@ curveRefined = interpBreakpointCurve(fSharp(refined), psdTargetSharp(refined), f
 assert(min(curveRefined - psdTargetSharp) >= -1e-9*max(psdTargetSharp), ...
     'refineBreakpointsGreedy lost full coverage while adding points');
 
+%% 7. Adaptive margin: 0 dB at the peak, full MarginDB at the quiet floor
+% Mirrors the 'adaptive' MarginMode logic in generatePSDBreakpointTable.m.
+fAdapt = (1:1:500)';
+psdAdapt = 1e-3 + 0.2*exp(-((fAdapt-250).^2)/(2*3^2)); % same shape as test 6
+marginDBMax = 3;
+
+psdDB = 10*log10(psdAdapt);
+normalizedLevel = (psdDB - min(psdDB)) / (max(psdDB) - min(psdDB));
+marginDBLocal = marginDBMax * (1 - normalizedLevel);
+psdTargetAdapt = psdAdapt .* 10.^(marginDBLocal/10);
+
+[~, peakPos] = max(psdAdapt);
+[~, floorPos] = min(psdAdapt);
+assert(abs(marginDBLocal(peakPos)) < 1e-9, 'adaptive margin at the peak should be exactly 0 dB');
+assert(abs(marginDBLocal(floorPos) - marginDBMax) < 1e-9, ...
+    'adaptive margin at the quietest point should equal the requested MarginDB');
+
+% A uniform-margin hull always inflates the peak; the adaptive one should
+% not, so it must achieve a strictly lower ratio for the same MarginDB.
+grmsOrigAdapt = computeOriginalGrms(fAdapt, psdAdapt);
+hullUniform = upperConvexHullLogLog(fAdapt, psdAdapt * 10^(marginDBMax/10));
+ratioUniform = computeBreakpointGrms(fAdapt(hullUniform), (psdAdapt(hullUniform))*10^(marginDBMax/10)) / grmsOrigAdapt;
+hullAdapt = upperConvexHullLogLog(fAdapt, psdTargetAdapt);
+ratioAdapt = computeBreakpointGrms(fAdapt(hullAdapt), psdTargetAdapt(hullAdapt)) / grmsOrigAdapt;
+assert(ratioAdapt < ratioUniform, 'adaptive margin should beat uniform margin on a peaky spectrum');
+
+% Full coverage of the adaptive target must still hold.
+curveAdapt = interpBreakpointCurve(fAdapt(hullAdapt), psdTargetAdapt(hullAdapt), fAdapt);
+assert(min(curveAdapt - psdTargetAdapt) >= -1e-9*max(psdTargetAdapt), ...
+    'adaptive-margin hull failed to envelope its own target');
+
 fprintf('All psdBreakpoints sanity tests passed.\n');
