@@ -30,6 +30,12 @@ function [bpTable, diagnostics] = generatePSDBreakpointTable(f, psd, varargin)
 %                       (default false).
 %     'Plot'           If true (default), plots original vs breakpoint
 %                       curve on log-log axes.
+%     'OutputFolder'   If non-empty, saves the FINAL results there (the
+%                       post-edit table/plot if 'Interactive' was used):
+%                       breakpoint_table.csv and
+%                       psd_breakpoint_comparison.png (original PSD vs
+%                       breakpoint curve, log-log). The folder is created
+%                       if it does not exist. Default '' (nothing saved).
 %
 %   Outputs:
 %     bpTable      MATLAB table, variables Frequency_Hz and PSD, sorted
@@ -58,6 +64,7 @@ addParameter(p, 'MarginDB', 3, @(v) isscalar(v) && isnumeric(v));
 addParameter(p, 'TargetRmsRatio', 1.4, @(v) isscalar(v) && v > 1);
 addParameter(p, 'Interactive', false, @(v) isscalar(v));
 addParameter(p, 'Plot', true, @(v) isscalar(v));
+addParameter(p, 'OutputFolder', '', @(v) ischar(v) || isstring(v));
 parse(p, f, psd, varargin{:});
 
 f = p.Results.f(:);
@@ -67,6 +74,7 @@ marginDB = p.Results.MarginDB;
 targetRmsRatio = p.Results.TargetRmsRatio;
 doInteractive = logical(p.Results.Interactive);
 doPlot = logical(p.Results.Plot);
+outputFolder = char(p.Results.OutputFolder);
 
 if numel(f) ~= numel(psd)
     error('generatePSDBreakpointTable:sizeMismatch', ...
@@ -174,6 +182,25 @@ if doInteractive
     bpTable = editBreakpointTableGUI(f, psd, bpTable, targetRmsRatio, marginDB);
     diagnostics = evaluateBreakpointTable(f, psd, bpTable, targetRmsRatio, marginDB);
     diagnostics.maxPoints = maxPoints;
+end
+
+if ~isempty(outputFolder)
+    if ~exist(outputFolder, 'dir')
+        mkdir(outputFolder);
+    end
+
+    tablePath = fullfile(outputFolder, 'breakpoint_table.csv');
+    writetable(bpTable, tablePath);
+
+    % Always render a fresh plot of the FINAL table (post-edit, if any)
+    % for saving, independent of the 'Plot' display option above.
+    saveFig = plotPSDBreakpoints(f, psd, bpTable, diagnostics);
+    plotPath = fullfile(outputFolder, 'psd_breakpoint_comparison.png');
+    print(saveFig, plotPath, '-dpng', '-r150');
+    close(saveFig);
+
+    fprintf('  Saved breakpoint table -> %s\n', tablePath);
+    fprintf('  Saved comparison plot  -> %s\n', plotPath);
 end
 end
 

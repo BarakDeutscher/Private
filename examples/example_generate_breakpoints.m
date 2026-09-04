@@ -31,12 +31,19 @@ psd = psd + 0.015 * exp(-((f-900).^2) / (2*20^2));
 % square root, before any point-reduction overshoot is even considered).
 % For TargetRmsRatio = 1.4 that means MarginDB must stay below
 % 20*log10(1.4) = 2.92 dB, so this example uses 2 dB.
+% OutputFolder saves the FINAL breakpoint table (breakpoint_table.csv)
+% and a PNG comparing the original PSD to the final breakpoint curve
+% (psd_breakpoint_comparison.png) side by side in the same folder. If
+% 'Interactive' is also true, both are saved AFTER your manual edits.
+outputFolder = fullfile(fileparts(mfilename('fullpath')), 'output');
+
 [bpTable, diagnostics] = generatePSDBreakpointTable(f, psd, ...
     'MaxPoints', 10, ...
     'MarginDB', 2, ...
     'TargetRmsRatio', 1.4, ...
     'Interactive', false, ...
-    'Plot', true);
+    'Plot', true, ...
+    'OutputFolder', outputFolder);
 
 disp(bpTable);
 disp(diagnostics);

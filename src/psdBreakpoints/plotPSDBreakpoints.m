@@ -1,7 +1,10 @@
-function plotPSDBreakpoints(f, psd, bpTable, diagnostics)
+function fig = plotPSDBreakpoints(f, psd, bpTable, diagnostics)
 %PLOTPSDBREAKPOINTS Log-log plot of original spectrum vs breakpoint curve.
+%   fig = PLOTPSDBREAKPOINTS(f, psd, bpTable, diagnostics) returns the
+%   figure handle so callers can also save it (see the 'OutputFolder'
+%   option of generatePSDBreakpointTable).
 
-figure('Name', 'PSD Breakpoint Reduction');
+fig = figure('Name', 'PSD Breakpoint Reduction');
 loglog(f, psd, '-', 'Color', [0.6 0.6 0.6], 'LineWidth', 1, 'DisplayName', 'Original PSD');
 hold on;
 loglog(bpTable.Frequency_Hz, bpTable.PSD, '-o', 'Color', [0.85 0.1 0.1], ...

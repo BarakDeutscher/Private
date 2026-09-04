@@ -65,11 +65,18 @@ addpath('src/psdBreakpoints');
     'MarginDB', 2, ...         % coverage margin above the original, in dB
     'TargetRmsRatio', 1.4, ... % target ceiling on grms_new / grms_original
     'Interactive', false, ...  % true = open the manual-edit GUI after
-    'Plot', true);
+    'Plot', true, ...
+    'OutputFolder', 'output'); % saves table + comparison PNG here
 
 disp(bpTable);        % table with Frequency_Hz, PSD
 disp(diagnostics);     % grmsOriginal, grmsBreakpoint, rmsRatio, minMarginDB, ...
 ```
+
+When `OutputFolder` is set, two files are written there (folder created if
+needed): `breakpoint_table.csv` (the final table) and
+`psd_breakpoint_comparison.png` (original PSD vs. the final breakpoint
+curve, log-log). If `Interactive` is also `true`, both reflect the table
+*after* your manual edits, not the auto-generated one.
 
 To edit a table by hand at any later point (not just right after
 generation):
