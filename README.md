@@ -14,6 +14,11 @@ fewest breakpoints needed so the piecewise-linear curve **envelopes**
 
 ## What it does
 
+0. (Optional) If you only have a raw acceleration **time history**, not
+   a PSD yet, `computeWelchPSD` turns it into one first: a one-sided
+   Welch PSD estimate (Hann-windowed, your choice of frequency
+   resolution and segment overlap) on a linearly spaced frequency grid -
+   exactly the input format the rest of the pipeline expects.
 1. Computes the composite RMS (**Grms**) of your original PSD.
 2. Applies your requested coverage margin (in dB) above the original.
 3. Finds the minimal breakpoint set that envelopes the margined spectrum,
@@ -36,6 +41,7 @@ fewest breakpoints needed so the piecewise-linear curve **envelopes**
 
 ```
 src/psdBreakpoints/
+  computeWelchPSD.m          Time history -> one-sided Welch PSD estimate
   computeOriginalGrms.m      Grms of the linearly spaced input PSD (trapz)
   segmentMeanSquare.m        Closed-form integral of one log-log segment
   computeBreakpointGrms.m    Grms of a full breakpoint table
@@ -48,17 +54,42 @@ src/psdBreakpoints/
   editBreakpointTableGUI.m   Interactive manual-edit GUI
 
 examples/
-  example_generate_breakpoints.m   End-to-end example
+  compute_initial_psd_from_timehistory.m   Time history CSV -> initial PSD
+  example_generate_breakpoints.m           End-to-end breakpoint example
 
 tests/
   test_psd_breakpoints.m     Self-contained sanity checks (no toolboxes)
+  test_welch_psd.m           computeWelchPSD checks (needs Signal Proc. Toolbox)
 ```
 
 ## Usage
 
+### Starting from a time history
+
 ```matlab
 addpath('src/psdBreakpoints');
 
+data = readmatrix('time_history.csv');   % 2 columns: time (s), acceleration (g)
+t = data(:,1);
+x = data(:,2);
+
+[f, psd, info] = computeWelchPSD(t, x, 1, 0.5); % 1 Hz resolution, 50% overlap
+f = f(2:end); psd = psd(2:end);                 % drop the f=0 (DC) bin
+```
+
+`computeWelchPSD` estimates the sample rate from the *total time span
+divided by sample count*, not local sample-to-sample differences - real
+exported CSV timestamps are often rounded to only a handful of
+significant figures, which can make truly uniform sampling look jittery
+row-to-row; averaging over the whole file cancels that out. `info` also
+reports a Parseval cross-check: `info.grmsFromPSD` (Grms recovered by
+integrating the PSD) should closely match `info.grmsTimeDomain` (the
+time-domain `std` of the signal) - a sanity check that the PSD was
+computed correctly, in the same spirit as the Grms-ratio check below.
+
+### Starting from a PSD
+
+```matlab
 % f, psd: your linearly frequency-spaced input spectrum (Hz, units^2/Hz)
 [bpTable, diagnostics] = generatePSDBreakpointTable(f, psd, ...
     'MaxPoints', 10, ...       % max breakpoints allowed
