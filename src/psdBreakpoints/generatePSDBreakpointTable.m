@@ -19,7 +19,14 @@ function [bpTable, diagnostics] = generatePSDBreakpointTable(f, psd, varargin)
 %                       dB, before the envelope is fit (default 3 dB; use
 %                       0 dB for a tight envelope with no headroom).
 %     'TargetRmsRatio' Desired upper bound on grms_new/grms_orig (default
-%                       1.4). This is not enforced by construction -
+%                       1.4). If the minimal fully-enveloping breakpoint
+%                       set already fits within MaxPoints but overshoots
+%                       this target, spare points are spent greedily
+%                       (see refineBreakpointsGreedy.m) narrowing the gap
+%                       until the target is met, MaxPoints runs out, or
+%                       no further insertion can reduce the ratio (a true
+%                       local optimum - not every MarginDB/MaxPoints
+%                       combination can reach every target).
 %                       diagnostics.meetsRmsTarget reports whether it was
 %                       actually achieved, with a warning if not (reduce
 %                       MarginDB and/or raise MaxPoints to fix it).
@@ -141,6 +148,17 @@ if numel(hullIdx) > maxPoints
     x = log10(f);
     y = log10(psdTarget);
     hullIdx = reduceBreakpointsVW(x, y, hullIdx, maxPoints);
+elseif numel(hullIdx) < maxPoints
+    % The minimal fully-enveloping hull already fits the point budget -
+    % but fewest-points-for-coverage is NOT the same as lowest-area (a
+    % point the hull leaves out because it's dominated by its neighbors'
+    % straight line can still be worth adding: it lets the curve dip down
+    % and track a real local valley between two much higher, distant
+    % features, cutting Grms, as long as the two new sub-segments it
+    % creates still cover everything in their own sub-ranges). Spend the
+    % spare point budget on this before giving up on TargetRmsRatio.
+    targetGrms = targetRmsRatio * grmsOriginal;
+    hullIdx = refineBreakpointsGreedy(f, psdTarget, hullIdx, maxPoints, targetGrms);
 end
 
 bpFreq = f(hullIdx);

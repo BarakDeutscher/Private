@@ -28,7 +28,13 @@ fewest breakpoints needed so the piecewise-linear curve **envelopes**
    the line between their neighbors).
 4. If that needs more points than your `MaxPoints` budget, it trims the
    least significant breakpoints first (Visvalingam–Whyatt area-based
-   simplification), reporting any resulting shortfall in coverage.
+   simplification), reporting any resulting shortfall in coverage. If
+   instead there's spare budget left over, it spends it greedily
+   (`refineBreakpointsGreedy.m`) narrowing the gap to `TargetRmsRatio` -
+   fewest-points-for-coverage and lowest-area-for-a-point-budget are
+   different problems, and a sharp, distant peak can force the minimal
+   hull to badly overshoot a quiet floor even though every floor sample
+   is individually "dominated" by its neighbors' straight line.
 5. Computes the Grms of the new breakpoint curve using the standard
    closed-form log-log segment integral (not linear trapezoidal
    integration, which would misstate the area under log-log segments),
@@ -48,6 +54,7 @@ src/psdBreakpoints/
   interpBreakpointCurve.m    Evaluate the breakpoint curve at any frequency
   upperConvexHullLogLog.m    Minimal enveloping breakpoint set
   reduceBreakpointsVW.m      Point-budget trim (Visvalingam-Whyatt)
+  refineBreakpointsGreedy.m  Spend spare points to shrink the Grms ratio
   evaluateBreakpointTable.m  Grms ratio + coverage margin for any table
   plotPSDBreakpoints.m       Log-log plot helper
   generatePSDBreakpointTable.m   Main entry point
@@ -129,7 +136,9 @@ MATLAB install.
   table. If the exact envelope needs more, the least significant
   breakpoints are dropped first and a warning reports the worst-case
   coverage shortfall (`diagnostics.minMarginDB` — negative means the
-  curve dips below the original by that many dB somewhere).
+  curve dips below the original by that many dB somewhere). If the exact
+  envelope needs fewer, the spare points are spent narrowing the Grms
+  ratio (see below) rather than left unused.
 - **`MarginDB`** — how far above the original PSD the curve should sit,
   applied uniformly before the envelope is fit. `0` = tight envelope
   (curve touches the original at its peaks), positive values add
@@ -137,6 +146,25 @@ MATLAB install.
 - **`TargetRmsRatio`** — the ceiling you want on `grms_new / grms_original`.
   This is a check, not a hard constraint: `diagnostics.meetsRmsTarget`
   reports whether it was actually achieved, with a warning if not.
+
+### Why the ratio can overshoot even with points to spare
+
+Minimizing the *number* of breakpoints needed for full coverage
+(`upperConvexHullLogLog`) and minimizing the *enclosed area* (Grms) for a
+given point budget are different problems. A sharp resonance peak sitting
+far above a quiet noise floor forces the hull's bridging segment to badly
+overshoot that floor in between - even though every floor sample is
+individually "dominated" (below the straight line joining the peak to its
+distant neighbor, so the hull correctly leaves it out of the *minimal*
+set). Voluntarily adding some of those dominated points back in lets the
+curve dip down and track the real floor, cutting Grms substantially - as
+long as the two new segments each insertion creates still stay above
+everything in their own sub-range, which `refineBreakpointsGreedy.m`
+checks before accepting any insertion. This is exactly the case with real
+flight vibration data carrying a strong tonal peak: the minimal hull can
+need very few points (e.g. 9) but overshoot the target ratio by a lot
+(e.g. 2.5x), while spending a realistic point budget (e.g. 21) on
+targeted insertions gets it back under target.
 
 ### Important interaction: margin sets a floor on the ratio
 

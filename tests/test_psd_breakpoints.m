@@ -62,4 +62,33 @@ assert(numel(reduced) == maxPoints, 'reduceBreakpointsVW did not respect MaxPoin
 assert(reduced(1) == hullIdx(1) && reduced(end) == hullIdx(end), ...
     'reduceBreakpointsVW must never drop the first/last breakpoint');
 
+%% 6. refineBreakpointsGreedy: spare point budget must reduce Grms ratio
+% Regression test for a real finding: the minimal fully-enveloping hull
+% minimizes POINT COUNT, not AREA. A sharp, distant peak sitting far
+% above a quiet floor forces the hull's bridging segments to badly
+% overshoot the floor - even though every floor sample is individually
+% "dominated" (below the segment endpoints' straight line, so the hull
+% correctly omits it), voluntarily adding some of those dominated points
+% back in lets the curve track the floor and can cut Grms substantially,
+% as long as coverage is never lost.
+fSharp = (1:1:500)';
+psdSharp = 1e-3 + 0.2*exp(-((fSharp-250).^2)/(2*3^2)); % floor ~1e-3, sharp peak ~0.2 at f=250
+marginDB = 1;
+psdTargetSharp = psdSharp * 10^(marginDB/10);
+grmsOrigSharp = computeOriginalGrms(fSharp, psdSharp);
+
+hullSharp = upperConvexHullLogLog(fSharp, psdTargetSharp);
+ratioHull = computeBreakpointGrms(fSharp(hullSharp), psdTargetSharp(hullSharp)) / grmsOrigSharp;
+assert(ratioHull > 1.4, 'test setup assumption failed: expected the minimal hull to badly overshoot here');
+
+refined = refineBreakpointsGreedy(fSharp, psdTargetSharp, hullSharp, 20, 1.05*grmsOrigSharp);
+ratioRefined = computeBreakpointGrms(fSharp(refined), psdTargetSharp(refined)) / grmsOrigSharp;
+
+assert(ratioRefined < ratioHull, 'refineBreakpointsGreedy did not improve on the plain hull');
+assert(numel(refined) <= 20, 'refineBreakpointsGreedy exceeded its point budget');
+
+curveRefined = interpBreakpointCurve(fSharp(refined), psdTargetSharp(refined), fSharp);
+assert(min(curveRefined - psdTargetSharp) >= -1e-9*max(psdTargetSharp), ...
+    'refineBreakpointsGreedy lost full coverage while adding points');
+
 fprintf('All psdBreakpoints sanity tests passed.\n');
